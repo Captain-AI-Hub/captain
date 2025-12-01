@@ -41,6 +41,11 @@ COLLECT_ALL_PACKAGES = [
     "langchain_mistralai",
     "langchain_huggingface",
     "langchain_xai",
+    "langchain_huggingface",
+    "langchain_qwq",
+    "langchain_google_vertexai",
+    "chromadb",
+    "langchain_chroma",
     # 其他依赖
     "mcp",
     "pydantic",

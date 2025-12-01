@@ -24,6 +24,13 @@ content = '''
     base_url = ""
     system_prompt = '''
     '''
+[model_config.vlm_agent]
+    model_name = ""
+    api_key = ""
+    base_url = ""
+    system_prompt = '''
+    '''
+    inside_tools = ["read_image"]
 [model_config.sub_agent_1]
     model_name = ""
     api_key = ""

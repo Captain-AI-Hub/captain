@@ -109,6 +109,11 @@ def build():
         "--include-package=langchain_mistralai",
         "--include-package=langchain_huggingface",
         "--include-package=langchain_xai",
+        "--include-package=langchain_huggingface",
+        "--include-package=langchain_qwq",
+        "--include-package=chromadb",
+        "--include-package=langchain_chroma",
+        "--include-package=langchain_google_vertexai",
         
         # 包含 MCP 相关包（可能也使用动态导入）
         "--include-package=mcp",

@@ -35,6 +35,7 @@ content = '''
     base_url = ""
     system_prompt = '''
     '''
+    vlm_enabled = true
 [model_config.sub_agent_1]
     model_name = ""
     api_key = ""
@@ -74,7 +75,11 @@ use {example_arg1} and {example_arg2} to ...
 inside_tools 是内部编写的工具默认不传给子 agent。目前有的 inside_tools:
 
 * shell_exec 执行 shell 命令
+* * shell_exec : 执行 shell 命令
 * internet_search 互联网搜索
+* * internet_search : 互联网搜索 （需要 tavily api key）
+* vlm_tools 视觉语言模型工具（视觉模型生效）
+* * read_image : 读取图片
 
 **主 agent 默认配置：**
 
@@ -89,6 +94,7 @@ inside_tools:
 
 * shell_exec : 执行 shell 命令
 * internet_search : 互联网搜索 （需要 tavily api key）
+* read_image : 读取图片
 
 **子 agent 默认配置：**
 
@@ -572,6 +578,57 @@ Type 'exit' or 'quit' to exit
 │                                                                                                                  │
 │ Let me know what would be most useful!                                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+```
+
+```text
+(.venv) PS E:\DM\captain> python .\main.py
+
+🚀 Welcome to Captain Cmd Tools
+
+  Major Model     gpt-5-nano
+  Sub Agents
+   -> ida_agent   claude-haiku-4-5-20251001-thinking
+  Workspace       E:\DM\captain
+  CheckpointDB    E:\DM\captain\.captain\checkpoint.db
+  StoreDB         E:\DM\captain\.captain\store.db
+
+
+Type 'exit' or 'quit' to exit
+
+
+> 描述这张图片：./Girl.png
+
+╭────────────────────────────────────────────────── ✅ read_image - Complete ──────────────────────────────────────────────────╮
+│ 🔧 read_image                                                                                                                │
+│ Args: {                                                                                                                      │
+│   "path_or_url": "./Girl.png",                                                                                               │
+│   "prompt": "Describe the content of this image."                                                                            │
+│ }                                                                                                                            │
+│                                                                                                                              │
+│ Result:                                                                                                                      │
+│ {"__vlm_image__": true, "content": [{"type": "text", "text": "Describe the content of this image."}, {"type": "image",       │
+│ "source_type": "base64", "mime_type": "image/png", "data":                                                                   │
+│ "UklGRmBlAABXRUJQVlA4IFRlAADwgQKdASrQAtACPm00lUekK6SjqLOZ+XANiWdulrBoXzbMuZZ09Urqj+EytonkiDeo74xmUpu+9lF8SHzz+M72T+ry9eynm6e │
+│ vH08O2P5o+qD5H/Q/8r/Geav5P7q+1HXEZJXzr9Hf2/8t7Qe2f6E6hH5R/T/9V69kh1RLz8v0vQ7+K9QTh96BflAf9PnSzfSsPvqO4cqU8AUzQjFJ7Xq7G5dyRO9 │
+│ DbHZ//Z69DI6X/wZNalbZv7hm8P72YLwP5FpeFrHvtAfp6uPOlhO9tFZM/ZWvTstQPGxrOtB1WaOsFKJeIrnZLflyTuL2DtjKQWY+CPIr4CV27vUhY3nqi9hB/// │
+│ /nk/f648y06Y7eLbYBd+Wc1lB//1JQYdf3/EqDkU/5+jktK8vIPGCm5drQY288o+sU95A2xB0lyW0UWznwWIMpbXTy6Xy6b+R/1czGiHdghHkdEGY8bj+Sdf4Ldg │
+│ w1mB8YMOzkHBV8Oi0h5A/59Yn+hyI7cfX08L3BHo/sm1D44hqC4xlMn3m9urXFterfZBOR+0y4ks5Da96dT8XJhVmFMKdRGdd4F6V/qEYjv2A6oSs1/HJ8rgwyj2 │
+│ ALpbbtqKob9FZ+2IArTZ6oKKN0JXhk/8pB27DDy8Rjr9AVlgRm+wVhPXJA41mZ/qXjlIstOyIYsF1fdow/EEmPJqIrcqi3gpnhjRb2R/tEAiTZTfE2nfOhYTmrT2 │
+│ H2IjRDkQmghwX/MdbL59sF/8bDCL3+u4u5sQybYL55NWLkRxXLEqDrFfe9jjTe40n/a4nGQWX4R5lH                                               │
+│ ... (truncated)                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────── 💬 Model Answer ───────────────────────────────────────────────────────╮
+│ analyzing image...这是一张女孩的肖像照片，画面看起来聚焦在她的脸部和上半身，背景较为简单，光线柔和。                         │
+│                                                                                                                              │
+│ 如果要更具体地描述（需要你确认或让我继续分析）：                                                                             │
+│                                                                                                                              │
+│  • 发型与衣着：长发披肩，可能穿着浅色上衣。                                                                                  │
+│  • 表情与姿态：面部表情较平静，正对镜头或略微侧身。                                                                          │
+│  • 背景与色调：背景不显眼，整体色调偏明亮。                                                                                  │
+│                                                                                                                              │
+│ 需要我给出更细之处的描述吗？例如具体的发色、眼睛特点、服装颜色、背景颜色等，请告诉我你想要关注的细节，或者让我对图片进行更深 │
+│ 入的逐区域分析。                                                                                                             │╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ```
 

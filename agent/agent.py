@@ -16,10 +16,9 @@ from deepagents.middleware import (
 )
 from deepagents.backends import (
     FilesystemBackend,
-    CompositeBackend,
-    StoreBackend,
 )
 from pathlib import Path
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 
 async def build_sub_agent(
     model_name: str,
@@ -60,12 +59,20 @@ async def build_sub_agent(
     if inside_tools:
         mcp_tools_list.extend(inside_tools)
     try:
-        model = init_chat_model(
-            model=model_name,
-            base_url=base_url,
-            api_key=api_key
-        )
-
+        model = None
+        if model_name.startswith("gemini"):
+            model = ChatGoogleGenerativeAI(
+                model=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                transport= "rest" if base_url!="https://generativelanguage.googleapis.com" else None,
+            )
+        else:
+            model = init_chat_model(
+                model=model_name,
+                base_url=base_url,
+                api_key=api_key
+            )
         agent = create_agent(
             model=model,
             tools=mcp_tools_list if mcp_tools_list else None,

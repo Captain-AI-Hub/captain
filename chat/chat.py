@@ -10,12 +10,11 @@ from pathlib import Path
 from utils.utils import (
     cprint, Colors,
     get_database_path, get_local_file_store_path,
-    get_major_config, get_model_config,
-    get_major_agent_config, get_sub_agents_config,
+    get_major_config, get_sub_agents_config,
     get_workspace_path
 )
 from tools.utils import ErrorHandlingMiddleware
-
+from tools.vlm_tools import read_image
 from langchain.agents.middleware import (
     TodoListMiddleware,
 )
@@ -27,10 +26,10 @@ from deepagents.middleware import (
 )
 
 from deepagents.backends import (
-    CompositeBackend,
-    StoreBackend,
     FilesystemBackend
 )
+
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
@@ -114,12 +113,21 @@ async def build_agent(
 
     try:
         # 初始化模型
-        model = init_chat_model(
-            model=model_name,
-            base_url=base_url,
-            api_key=api_key
-        )
-                
+        model = None
+        if model_name.startswith("gemini"):
+            model = ChatGoogleGenerativeAI(
+                model=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                transport= "rest" if base_url!="https://generativelanguage.googleapis.com" else None,
+            )
+        else:
+            model = init_chat_model(
+                model=model_name,
+                base_url=base_url,
+                api_key=api_key
+            )
+
         # 确保资源已初始化
         if _store is None or _checkpoint is None:
             if not await init_resources():
@@ -128,7 +136,7 @@ async def build_agent(
         # 创建代理
         agent = create_agent(
             model=model,
-            tools=[shell_exec, internet_search],
+            tools=[shell_exec, internet_search, read_image],
             store=_store,
             checkpointer=_checkpoint,
             system_prompt=system_prompt,
@@ -162,10 +170,11 @@ async def process_agent(agent: Any, message: str):
     """处理代理流式输出"""
     try:
         messages = [HumanMessage(content=message)]
+        config = get_major_config()
         async for stream_mode, chunk in agent.astream(
             {"messages": messages},
             stream_mode=["updates", "messages"],
-            config=get_major_config()
+            config=config
         ):
             try:
                 # ============ messages 模式：流式 token ============
@@ -234,6 +243,42 @@ async def process_agent(agent: Any, message: str):
                                         "type": "sub_agent",
                                         "content": msg.content,
                                     }
+                                
+                                # ---- 处理 read_image 工具返回的图片内容 ----
+                                if tool_name == "read_image":
+                                    try:
+                                        # 工具返回的是带有 __vlm_image__ 标记的 JSON
+                                        content = msg.content
+                                        image_content = None
+                                        
+                                        # 解析 JSON 格式的工具返回值
+                                        if isinstance(content, str):
+                                            try:
+                                                parsed = json.loads(content)
+                                                # 检查是否有 __vlm_image__ 标记
+                                                if isinstance(parsed, dict) and parsed.get('__vlm_image__'):
+                                                    image_content = parsed.get('content')
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif isinstance(content, dict) and content.get('__vlm_image__'):
+                                            image_content = content.get('content')
+                                        
+                                        # 如果成功解析到图片内容，注入 HumanMessage
+                                        if image_content:
+                                            image_message = HumanMessage(content=image_content)
+                                            await agent.aupdate_state(
+                                                config=config,
+                                                values={"messages": [image_message]}
+                                            )
+                                            yield {
+                                                "type": "image_injected",
+                                                "content": "Image content injected into conversation"
+                                            }
+                                    except Exception as e:
+                                        yield {
+                                            "type": "error",
+                                            "content": f"Failed to inject image message: {e}"
+                                        }
  
             except Exception as e:
                 import traceback
@@ -328,6 +373,11 @@ async def ChatStream(
                 yield {
                     "type": "sub_agent",
                     "content": message["content"]
+                }
+            elif message["type"] == "image_injected":
+                yield {
+                    "type": "model_answer",
+                    "content": "analyzing image..."
                 }
             elif message["type"] == "error":
                 yield {

@@ -29,6 +29,28 @@ from collections import OrderedDict
 from pathlib import Path
 from utils.sys_shell import parse_shell_command, execute_shell_command
 
+# import ssl
+# import urllib3
+
+# # Disable SSL verification warnings
+# urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# # Create an unverified SSL context and set it as default
+# ssl._create_default_https_context = ssl._create_unverified_context
+
+# # Also patch requests.Session to use verify=False by default
+# import requests
+# from functools import wraps
+
+# _original_session_request = requests.Session.request
+
+# @wraps(_original_session_request)
+# def _patched_session_request(self, method, url, **kwargs):  # type: ignore[misc]
+#     kwargs.setdefault('verify', False)
+#     return _original_session_request(self, method, url, **kwargs)
+
+# requests.Session.request = _patched_session_request  # type: ignore[method-assign]
+
 async def main():
     """主程序入口"""
     
