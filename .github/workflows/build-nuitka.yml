@@ -61,26 +61,39 @@ jobs:
         pip install -r requirements.txt
         pip install nuitka zstandard ordered-set
 
-    # Windows
+    # Windows - ccache
     - name: Setup ccache (Windows)
       if: runner.os == 'Windows'
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: ${{ runner.os }}-${{ matrix.platform.arch }}-ccache
+        key: nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-
 
-    # Linux
+    # Linux - install ccache and patchelf
     - name: Install build tools (Linux)
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y ccache patchelf
 
-    # macOS
+    # Linux - restore/save ccache
+    - name: Setup ccache (Linux)
+      if: runner.os == 'Linux'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-
+
+    # macOS - ccache
     - name: Setup ccache (macOS)
       if: runner.os == 'macOS'
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: ${{ runner.os }}-${{ matrix.platform.arch }}-ccache
+        key: nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          nuitka-${{ runner.os }}-${{ matrix.platform.arch }}-
 
     - name: Build with Nuitka
       run: python build_with_nuitka.py
