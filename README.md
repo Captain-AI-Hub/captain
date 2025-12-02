@@ -808,6 +808,27 @@ use {example_arg1} and {example_arg2} to ...
 
 ```
 
+list 示例：
+
+```text
+> vector list
+
+                                                 📋 Vector Collections
+  Found 1 collection(s):
+    - test (19 documents)
+```
+
+store 示例：
+
+```text
+> vector store markdown ./test.md
+
+                                                ✅ Vector Store Success
+  Successfully stored 19 chunks from './test.md' into collection 'test'
+```
+
+RAG 实例：
+
 ```text
 > vector rag test "概述写了什么？"
 

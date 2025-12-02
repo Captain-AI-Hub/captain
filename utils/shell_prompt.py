@@ -20,6 +20,128 @@ from prompt_toolkit.keys import Keys
 from prompt_toolkit.key_binding import KeyBindings
 
 from utils.utils import get_workspace_path, list_prompt_templates
+import glob
+
+
+def is_path_like(text: str) -> bool:
+    """检查文本是否像文件路径（仅限 workspace 内的相对路径）"""
+    if not text:
+        return False
+    # 只允许 ./ 开头的相对路径（不允许 ../ 防止目录穿越）
+    if text.startswith("./"):
+        return True
+    return False
+
+
+def get_file_completions(partial_path: str, extensions: Optional[List[str]] = None):
+    """
+    获取文件路径补全（限制在 workspace 内）
+    
+    Args:
+        partial_path: 部分路径（用户已输入的部分）
+        extensions: 可选的文件扩展名过滤（如 ['.md', '.txt']）
+    
+    Yields:
+        Completion 对象
+    """
+    workspace = get_workspace_path() or "."
+    workspace_resolved = os.path.realpath(workspace)
+    
+    # 处理路径
+    if not partial_path:
+        partial_path = "./"
+    
+    # 安全检查：不允许 ../ 和绝对路径
+    if ".." in partial_path or os.path.isabs(partial_path):
+        return
+    
+    # 规范化路径分隔符
+    partial_path = partial_path.replace("\\", "/")
+    
+    # 确定搜索路径（始终基于 workspace）
+    search_base = os.path.join(workspace, partial_path)
+    search_base = os.path.normpath(search_base)
+    
+    # 安全检查：确保路径在 workspace 内
+    search_base_resolved = os.path.realpath(search_base)
+    if not search_base_resolved.startswith(workspace_resolved):
+        return
+    
+    # 如果是目录，列出目录内容
+    if os.path.isdir(search_base):
+        search_dir = search_base
+        prefix_part = ""
+        # 保持用户输入的路径格式
+        if partial_path.endswith("/") or partial_path.endswith(os.sep):
+            user_prefix = partial_path
+        else:
+            user_prefix = partial_path + "/"
+    else:
+        # 否则按前缀匹配
+        search_dir = os.path.dirname(search_base)
+        prefix_part = os.path.basename(search_base).lower()
+        # 获取用户输入的目录部分
+        if "/" in partial_path:
+            user_prefix = partial_path.rsplit("/", 1)[0] + "/"
+        elif os.sep in partial_path:
+            user_prefix = partial_path.rsplit(os.sep, 1)[0] + "/"
+        else:
+            user_prefix = ""
+    
+    # 再次检查 search_dir 是否在 workspace 内
+    search_dir_resolved = os.path.realpath(search_dir)
+    if not search_dir_resolved.startswith(workspace_resolved):
+        return
+    
+    if not os.path.isdir(search_dir):
+        return
+    
+    try:
+        entries = os.listdir(search_dir)
+        count = 0
+        for entry in sorted(entries):
+            if count >= 30:  # 限制数量
+                break
+            
+            # 跳过隐藏文件（除非用户明确输入 .）
+            if entry.startswith(".") and not prefix_part.startswith("."):
+                continue
+            
+            # 前缀匹配
+            if prefix_part and not entry.lower().startswith(prefix_part):
+                continue
+            
+            full_path = os.path.join(search_dir, entry)
+            is_dir = os.path.isdir(full_path)
+            
+            # 扩展名过滤（仅对文件）
+            if extensions and not is_dir:
+                if not any(entry.lower().endswith(ext.lower()) for ext in extensions):
+                    continue
+            
+            # 构建显示名称和补全文本
+            if is_dir:
+                display_name = entry + "/"
+                meta = "dir"
+            else:
+                display_name = entry
+                meta = "file"
+            
+            # 计算 start_position
+            if prefix_part:
+                start_pos = -len(prefix_part)
+            else:
+                start_pos = 0
+            
+            yield Completion(
+                entry + ("/" if is_dir else ""),
+                start_position=start_pos,
+                display=display_name,
+                display_meta=meta
+            )
+            count += 1
+    except (OSError, PermissionError):
+        pass
 
 
 def get_system_commands() -> Set[str]:
@@ -118,6 +240,18 @@ class CaptainCompleter(Completer):
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
         word = document.get_word_before_cursor()
+        
+        # 全局文件路径补全：检查当前正在输入的部分是否是路径
+        # 获取最后一个空格后的内容作为可能的路径
+        if " " in text:
+            last_part = text.rsplit(" ", 1)[-1]
+        else:
+            last_part = text
+        
+        # 如果最后输入的部分看起来像路径，进行文件补全
+        if is_path_like(last_part):
+            yield from get_file_completions(last_part)
+            return
         
         # 空输入或只有开头字符，显示所有可用命令
         if not text or text == word:
@@ -246,32 +380,33 @@ class CaptainCompleter(Completer):
                             display_meta="target"
                         )
                 elif len(parts) >= 2 and parts[1].lower() == "markdown":
+                    # 文件路径补全
                     if len(parts) == 2 and vector_part.endswith(" "):
-                        yield Completion(
-                            "",
-                            start_position=0,
-                            display="{Path}",
-                            display_meta="file path (required)"
-                        )
+                        # 刚输入空格，显示当前目录下的 .md 文件
+                        yield from get_file_completions("./", extensions=[".md"])
+                    elif len(parts) == 3 and not vector_part.endswith(" "):
+                        # 正在输入路径，补全文件
+                        partial_path = parts[2]
+                        yield from get_file_completions(partial_path, extensions=[".md"])
                     elif len(parts) == 3 and vector_part.endswith(" "):
                         yield Completion(
                             "",
                             start_position=0,
-                            display="[collection_name]",
+                            display="<collection_name>",
                             display_meta="optional, default: filename"
                         )
                     elif len(parts) == 4 and vector_part.endswith(" "):
                         yield Completion(
                             "600",
                             start_position=0,
-                            display="[chunk_size]",
+                            display="<chunk_size>",
                             display_meta="optional, default: 600"
                         )
                     elif len(parts) == 5 and vector_part.endswith(" "):
                         yield Completion(
                             "100",
                             start_position=0,
-                            display="[chunk_overlap]",
+                            display="<chunk_overlap>",
                             display_meta="optional, default: 100"
                         )
 
@@ -305,6 +440,38 @@ def create_key_bindings() -> KeyBindings:
     def clear_line(event):
         """Ctrl+U 清除当前行"""
         event.current_buffer.delete_before_cursor(len(event.current_buffer.text))
+    
+    @kb.add("enter")
+    def handle_enter(event):
+        """
+        Enter 键处理：
+        - 补全菜单打开且有选中项时：确认补全（目录则继续补全，文件则确认不发送）
+        - 补全菜单打开但无选中项时：正常提交
+        - 补全菜单关闭时：正常提交
+        """
+        buffer = event.current_buffer
+        
+        # 检查补全菜单是否打开且有选中项
+        if buffer.complete_state:
+            completions = buffer.complete_state.completions
+            index = buffer.complete_state.complete_index
+            
+            # 有选中的补全项
+            if completions and index is not None and 0 <= index < len(completions):
+                selected = completions[index]
+                completion_text = selected.text
+                
+                # 应用补全
+                buffer.apply_completion(selected)
+                
+                # 如果是目录（以 / 结尾），触发新的补全
+                if completion_text.endswith("/"):
+                    buffer.start_completion(select_first=False)
+                # 如果是文件，补全已应用，菜单会自动关闭，不提交
+                return
+        
+        # 补全菜单未打开或无选中项，正常提交
+        buffer.validate_and_handle()
     
     return kb
 
