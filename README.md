@@ -670,6 +670,10 @@ exit 命令：用于退出程序，例如：`exit`。
 
 ### 4. 自定义命令支持
 
+*支持自定义命令，通过 prompt_templates 配置文件中的 prompt_templates 配置。*
+
+*你也可以使用自定义命令为 agent 编写任务清单(Task List)*
+
 ```toml
 # Prompt Templates
 [prompt_templates]
