@@ -84,6 +84,9 @@ async def build_agent(
             sub_system_prompt = sub_agent_config.get("system_prompt", "")
             mcp_tools = sub_agent_config.get("mcp_tools", [])
             inside_tools = sub_agent_config.get("inside_tools", [])
+            # 支持从子代理配置中读取超时设置，默认 10 分钟
+            sub_timeout = sub_agent_config.get("timeout", 600)
+            sub_max_retries = sub_agent_config.get("max_retries", 3)
         except Exception as e:
             cprint(
                 f"[build_agent] Sub agent '{sub_agent_name}' config error: {e}", 
@@ -98,6 +101,8 @@ async def build_agent(
             system_prompt=sub_system_prompt,
             mcp_tools=mcp_tools,
             inside_tools=inside_tools,
+            timeout=sub_timeout,
+            max_retries=sub_max_retries,
         )
         if agent is not None:
             sub_agent.append(
@@ -115,6 +120,13 @@ async def build_agent(
 
     try:
         # 初始化模型
+        # 设置较长的超时时间以支持子代理长时间执行
+        # 默认 10 分钟超时，可在配置中覆盖
+        from utils.utils import get_major_agent_config as get_config
+        agent_config = get_config() or {}
+        timeout = agent_config.get("timeout", 600)  # 默认 10 分钟
+        max_retries = agent_config.get("max_retries", 3)  # 默认重试 3 次
+        
         model = None
         if model_name.startswith("gemini"):
             model = ChatGoogleGenerativeAI(
@@ -122,12 +134,15 @@ async def build_agent(
                 base_url=base_url,
                 api_key=api_key,
                 transport= "rest" if base_url!="https://generativelanguage.googleapis.com" else None,
+                timeout=timeout,
             )
         else:
             model = init_chat_model(
                 model=model_name,
                 base_url=base_url,
-                api_key=api_key
+                api_key=api_key,
+                timeout=timeout,
+                max_retries=max_retries,
             )
 
         # 确保资源已初始化
@@ -173,12 +188,26 @@ async def process_agent(agent: Any, message: str):
     try:
         messages = [HumanMessage(content=message)]
         config = get_major_config()
-        async for stream_mode, chunk in agent.astream(
+        async for raw_data in agent.astream(
             {"messages": messages},
             stream_mode=["updates", "messages"],
+            subgraphs=True,  # 启用子图流式输出以获取 sub_agent 的详细信息
             config=config
         ):
             try:
+                # subgraphs=True 时返回格式: (namespace, stream_mode, chunk)
+                # namespace: tuple，空 tuple () 表示主代理，非空表示子图路径
+                # stream_mode: str，如 "messages" 或 "updates"
+                # chunk: 对应 stream_mode 的数据
+                if not isinstance(raw_data, tuple) or len(raw_data) != 3:
+                    continue
+                
+                namespace, stream_mode, chunk = raw_data
+                
+                # 判断是否来自子代理 (namespace 非空表示来自子图)
+                is_subagent = len(namespace) > 0 if namespace else False
+                subagent_name = str(namespace[0]).split(":")[0] if is_subagent and namespace else None
+                
                 # ============ messages 模式：流式 token ============
                 if stream_mode == "messages":
                     token, metadata = chunk
@@ -195,16 +224,32 @@ async def process_agent(agent: Any, message: str):
                     for block in token.content_blocks:
                         # 模型的文本输出
                         if block.get("type") == "text" and node_name == "model":
-                            yield {
-                                "type": "model_answer",
-                                "content": block.get('text', ''),
-                            }
+                            if is_subagent:
+                                # 子代理的模型回答
+                                yield {
+                                    "type": "sub_agent_answer",
+                                    "content": block.get('text', ''),
+                                    "subagent": subagent_name,
+                                }
+                            else:
+                                yield {
+                                    "type": "model_answer",
+                                    "content": block.get('text', ''),
+                                }
                         # 模型的思考过程
                         elif block.get("type") == "reasoning":
-                            yield {
-                                "type": "model_thinking",
-                                "content": block.get('reasoning', ''),
-                            }
+                            if is_subagent:
+                                # 子代理的思考过程
+                                yield {
+                                    "type": "sub_agent_thinking",
+                                    "content": block.get('reasoning', ''),
+                                    "subagent": subagent_name,
+                                }
+                            else:
+                                yield {
+                                    "type": "model_thinking",
+                                    "content": block.get('reasoning', ''),
+                                }
                 
                 # ============ updates 模式：状态更新 ============
                 elif stream_mode == "updates":
@@ -223,61 +268,96 @@ async def process_agent(agent: Any, message: str):
                             # ---- 处理工具调用 ----
                             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    yield {
-                                        "type": "tool_call",
-                                        "name": tc.get('name') or tc['name'],  # 兼容不同格式
-                                        "args": tc.get('args', {}),
-                                        "id": tc.get('id')
-                                    }
+                                    tool_name = tc.get('name') or tc['name']
+                                    
+                                    if is_subagent:
+                                        # 子代理的工具调用
+                                        yield {
+                                            "type": "sub_agent_tool_call",
+                                            "name": tool_name,
+                                            "args": tc.get('args', {}),
+                                            "id": tc.get('id'),
+                                            "subagent": subagent_name,
+                                        }
+                                    elif tool_name == "task":
+                                        # 主代理调用 task 工具 -> 启动子代理
+                                        # 产出特殊事件，不当作普通工具处理
+                                        task_args = tc.get('args', {})
+                                        yield {
+                                            "type": "sub_agent_start",
+                                            "subagent": task_args.get('agent', 'general'),
+                                            "task": task_args.get('task', ''),
+                                            "id": tc.get('id')
+                                        }
+                                    else:
+                                        # 普通工具调用
+                                        yield {
+                                            "type": "tool_call",
+                                            "name": tool_name,
+                                            "args": tc.get('args', {}),
+                                            "id": tc.get('id')
+                                        }
                             
                             # ---- 处理工具结果 ----
                             if msg.__class__.__name__ == "ToolMessage":
-                                yield {
-                                    "type": "tool_result",
-                                    "content": msg.content,
-                                    "id": msg.tool_call_id,
-                                }
-                            
-                            if msg.__class__.__name__ == "ToolMessage":
                                 tool_name = getattr(msg, 'name', '')
-                                if tool_name == "task":  # SubAgentMiddleware 使用 'task' 作为工具名
-                                    yield {
-                                        "type": "sub_agent",
-                                        "content": msg.content,
-                                    }
                                 
-                                # ---- 处理 read_image 工具返回的图片内容 ----
-                                if tool_name == "read_image":
-                                    try:
-                                        # 工具返回的是带有 __vlm_image__ 标记的 JSON
-                                        content = msg.content
-                                        image_content = None
-                                        
-                                        # 解析 JSON 格式的工具返回值
-                                        if isinstance(content, str):
-                                            try:
-                                                parsed = json.loads(content)
-                                                # 检查是否有 __vlm_image__ 标记
-                                                if isinstance(parsed, dict) and parsed.get('__vlm_image__'):
-                                                    image_content = parsed.get('content')
-                                            except json.JSONDecodeError:
-                                                pass
-                                        elif isinstance(content, dict) and content.get('__vlm_image__'):
-                                            image_content = content.get('content')
-                                        
-                                        # 如果成功解析到图片内容，注入 HumanMessage
-                                        if image_content:
-                                            image_message = HumanMessage(content=image_content)
-                                            await agent.aupdate_state(
-                                                config=config,
-                                                values={"messages": [image_message]}
-                                            )
+                                if is_subagent:
+                                    # 子代理的工具结果
+                                    yield {
+                                        "type": "sub_agent_tool_result",
+                                        "content": msg.content,
+                                        "id": msg.tool_call_id,
+                                        "subagent": subagent_name,
+                                    }
+                                elif tool_name == "task":
+                                    # task 工具完成 = 子代理完成
+                                    # 产出子代理完成事件（包含最终结果摘要）
+                                    yield {
+                                        "type": "sub_agent_end",
+                                        "content": msg.content,
+                                        "id": msg.tool_call_id,
+                                    }
+                                else:
+                                    # 普通工具结果
+                                    yield {
+                                        "type": "tool_result",
+                                        "content": msg.content,
+                                        "id": msg.tool_call_id,
+                                    }
+                                    
+                                    # ---- 处理 read_image 工具返回的图片内容 ----
+                                    if tool_name == "read_image":
+                                        try:
+                                            # 工具返回的是带有 __vlm_image__ 标记的 JSON
+                                            content = msg.content
+                                            image_content = None
+                                            
+                                            # 解析 JSON 格式的工具返回值
+                                            if isinstance(content, str):
+                                                try:
+                                                    parsed = json.loads(content)
+                                                    # 检查是否有 __vlm_image__ 标记
+                                                    if isinstance(parsed, dict) and parsed.get('__vlm_image__'):
+                                                        image_content = parsed.get('content')
+                                                except json.JSONDecodeError:
+                                                    pass
+                                            elif isinstance(content, dict) and content.get('__vlm_image__'):
+                                                image_content = content.get('content')
+                                            
+                                            # 如果成功解析到图片内容，注入 HumanMessage
+                                            if image_content:
+                                                image_message = HumanMessage(content=image_content)
+                                                await agent.aupdate_state(
+                                                    config=config,
+                                                    values={"messages": [image_message]}
+                                                )
 
-                                    except Exception as e:
-                                        yield {
-                                            "type": "error",
-                                            "content": f"Failed to inject image message: {e}"
-                                        }
+                                        except Exception as e:
+                                            yield {
+                                                "type": "error",
+                                                "content": f"Failed to inject image message: {e}"
+                                            }
  
             except Exception as e:
                 import traceback
@@ -368,10 +448,51 @@ async def ChatStream(
                         "id": message["id"]
                     }, ensure_ascii=False)
                 }
-            elif message["type"] == "sub_agent":
+            # ---- 子代理生命周期事件 ----
+            elif message["type"] == "sub_agent_start":
                 yield {
-                    "type": "sub_agent",
-                    "content": message["content"]
+                    "type": "sub_agent_start",
+                    "subagent": message.get("subagent"),
+                    "task": message.get("task"),
+                    "id": message.get("id")
+                }
+            elif message["type"] == "sub_agent_end":
+                yield {
+                    "type": "sub_agent_end",
+                    "content": message["content"],
+                    "id": message.get("id")
+                }
+            # ---- 子代理流式输出 ----
+            elif message["type"] == "sub_agent_answer":
+                yield {
+                    "type": "sub_agent_answer",
+                    "content": message["content"],
+                    "subagent": message.get("subagent")
+                }
+            elif message["type"] == "sub_agent_thinking":
+                yield {
+                    "type": "sub_agent_thinking",
+                    "content": message["content"],
+                    "subagent": message.get("subagent")
+                }
+            elif message["type"] == "sub_agent_tool_call":
+                yield {
+                    "type": "sub_agent_tool_call",
+                    "content": json.dumps({
+                        "name": message["name"],
+                        "args": message["args"],
+                        "id": message["id"],
+                        "subagent": message.get("subagent")
+                    }, ensure_ascii=False)
+                }
+            elif message["type"] == "sub_agent_tool_result":
+                yield {
+                    "type": "sub_agent_tool_result",
+                    "content": json.dumps({
+                        "content": message["content"],
+                        "id": message["id"],
+                        "subagent": message.get("subagent")
+                    }, ensure_ascii=False)
                 }
             elif message["type"] == "error":
                 yield {

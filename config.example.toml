@@ -24,6 +24,8 @@ content = '''
     base_url = ""
     system_prompt = '''
     '''
+    timeout = 600       
+    max_retries = 3     
 [model_config.vlm_agent]
     model_name = ""
     api_key = ""
@@ -31,6 +33,8 @@ content = '''
     system_prompt = '''
     '''
     inside_tools = ["read_image"]
+    timeout = 600       
+    max_retries = 3     
 [model_config.sub_agent_1]
     model_name = ""
     api_key = ""
@@ -39,6 +43,8 @@ content = '''
     '''
     mcp_tools = ["example-stdio-mcp-name", "..."]
     inside_tools = ["..."]
+    timeout = 600       
+    max_retries = 3     
 [model_config.sub_agent_2]
     model_name = ""
     api_key = ""
@@ -47,6 +53,8 @@ content = '''
     '''
     mcp_tools = ["example-tcp-mcp-name", "..."]
     inside_tools = ["..."]
+    timeout = 600       
+    max_retries = 3     
 
 # Tavily API Key
 [tavily_config]

@@ -27,6 +27,8 @@ async def build_sub_agent(
     mcp_tools: list[str] | None = None,
     inside_tools: list[Any] | None = None,
     system_prompt: str | None = None,
+    timeout: int = 600,          # 默认 10 分钟超时
+    max_retries: int = 3,        # 默认重试 3 次
 ) -> Optional[Any]:
     """build sub agent"""
 
@@ -59,6 +61,7 @@ async def build_sub_agent(
     if inside_tools:
         mcp_tools_list.extend(inside_tools)
     try:
+        # 子代理可能执行较长时间的任务，使用传入的超时配置
         model = None
         if model_name.startswith("gemini"):
             model = ChatGoogleGenerativeAI(
@@ -66,12 +69,15 @@ async def build_sub_agent(
                 base_url=base_url,
                 api_key=api_key,
                 transport= "rest" if base_url!="https://generativelanguage.googleapis.com" else None,
+                timeout=timeout,
             )
         else:
             model = init_chat_model(
                 model=model_name,
                 base_url=base_url,
-                api_key=api_key
+                api_key=api_key,
+                timeout=timeout,
+                max_retries=max_retries,
             )
         agent = create_agent(
             model=model,
